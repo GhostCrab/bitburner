@@ -6,9 +6,10 @@ import { BitNodeMultipliers } from "../BitNode/BitNodeMultipliers";
 import { createRandomString } from "../utils/helpers/createRandomString";
 import { createRandomIp } from "../utils/IPAddress";
 import { Generic_fromJSON, Generic_toJSON, Reviver } from "../utils/JSONReviver";
-import { Player } from "./Player";
-import { calculateWeakenTime } from "./Hacking";
+import { Player } from "../Player";
+import { calculateWeakenTime } from "../Hacking";
 import { GetServer } from "./AllServers";
+import { CONSTANTS } from "../Constants";
 
 export interface IConstructorParams {
   adminRights?: boolean;
@@ -63,10 +64,10 @@ export class Server extends BaseServer {
   suppression = 0;
 
   // Tracks the number of active suppression threads acting on this server
-  activeSuppressionThreads: {hostname: string, threads: number}[] = [];
+  activeSuppressionThreads: { hostname: string; threads: number }[] = [];
 
   // Suppression function interval ID
-  suppressionIntervalID = 0;
+  suppressionIntervalID: NodeJS.Timer | null = null;
 
   // Last time suppression was calculated
   suppressionLastUpdateTime = 0;
@@ -183,41 +184,40 @@ export class Server extends BaseServer {
    * at 1.5
    */
   suppress(amt: number): void {
-    this.suppress += amt;
-    this.suppress = Math.min(this.suppress, 1.5);
+    this.suppression += amt;
+    this.suppression = Math.min(this.suppression, 1.5);
   }
 
   /**
    * Add to this server's active suppression and kick of suppression updates if this is the
    * initial suppression attack
    */
-  addSuppressionThreads(hostname: string, threads: number) {
+  addSuppressionThreads(hostname: string, threads: number): void {
     // Detect if we're starting to suppress this server and kick off suppression update
     if (this.activeSuppressionThreads.length === 0) {
-      if (this.suppressionIntervalID !== 0) {
-        console.error(`New suppression detected on ${this.hostname} but suppressionIntervalID is not 0`);
+      if (this.suppressionIntervalID !== null) {
+        console.error(`New suppression detected on ${this.hostname} but suppressionIntervalID is not null`);
         clearInterval(this.suppressionIntervalID);
-      } 
+      }
       this.suppressionLastUpdateTime = new Date().getTime();
-      this.suppressionIntervalID = setInterval(this.doSuppressionUpdate, 200)
+      this.suppressionIntervalID = setInterval(this.doSuppressionUpdate.bind(this), 200)
     }
 
-    this.activeSuppressionThreads.push({hostname: hostname, threads: threads});
+    this.activeSuppressionThreads.push({ hostname: hostname, threads: threads });
   }
 
   /**
    * Remove from this server's active supression thread collection and kill suppression updates if
    * there are no more active suppressions.
    */
-  removeSuppressionThreads(hostname: string, threads: number) {
+  removeSuppressionThreads(hostname: string, threads: number): void {
     if (this.activeSuppressionThreads.length === 0) {
-      console.error(`Attepting to remove suppresion threads from ${this.hostname} where server hostname is ${
-        hostname
-      } and threads is ${threads}, but there are no active suppresion threads`);
+      console.error(`Attepting to remove suppresion threads from ${this.hostname} where server hostname is ${hostname
+        } and threads is ${threads}, but there are no active suppresion threads`);
       return;
     }
 
-    const itemIndex = this.activeSuppressionThreads.findIndex(a => a.hostname === hostname && a.threads = threads);
+    const itemIndex = this.activeSuppressionThreads.findIndex(a => a.hostname === hostname && a.threads === threads);
 
     if (itemIndex === -1) {
       console.error(`Unable to find suppression item for ${this.hostname} where server hostname is ${hostname} and threads is ${threads}`);
@@ -227,12 +227,13 @@ export class Server extends BaseServer {
     this.activeSuppressionThreads.splice(itemIndex, 1);
 
     if (this.activeSuppressionThreads.length === 0) {
-      if (this.suppressionIntervalID === 0) {
-        console.error(`Suppression threads on ${this.hostname} have been reduced to 0 but suppressionIntervalID is 0`);
+      if (this.suppressionIntervalID === null) {
+        console.error(`Suppression threads on ${this.hostname} have been reduced to 0 but suppressionIntervalID is null`);
+      } else {
+        clearInterval(this.suppressionIntervalID);
       }
 
-      clearInterval(this.suppressionIntervalID);
-      this.suppressionIntervalID = 0;
+      this.suppressionIntervalID = null;
       this.suppressionLastUpdateTime = 0;
     }
   }
@@ -243,7 +244,7 @@ export class Server extends BaseServer {
    */
   doSuppressionUpdate(): void {
     const currentTime = new Date().getTime();
-    const weakenTime = calculateWeakenTime(server, Player);
+    const weakenTime = calculateWeakenTime(this, Player) * 1000;
     const dT = currentTime - this.suppressionLastUpdateTime;
     this.suppress((dT / weakenTime) / 2);
     this.suppressionLastUpdateTime = currentTime;
@@ -273,10 +274,23 @@ export class Server extends BaseServer {
   }
 
   /**
+   * Returns the suppression reduction given a number of hack and/or grow threads
+   */
+  suppressAnalyze(hackThreads?: number, growThreads?: number): number {
+    const realHackThreads = hackThreads === undefined || isNaN(hackThreads) ? 0 : Math.max(hackThreads, 0);
+    const realGrowThreads = growThreads === undefined || isNaN(growThreads) ? 0 : Math.max(growThreads, 0);
+
+    const amt = (CONSTANTS.ServerFortifyAmount * realHackThreads) + (2 * CONSTANTS.ServerFortifyAmount * realGrowThreads);
+
+    const suppressionFactor = this.getSuppressionFactor();
+    return (amt / suppressionFactor) / 2;
+  }
+
+  /**
    * Clean up active suppression intervals if the server is sold or destroyed
    */
   destroy(): void {
-    if (this.suppressionIntervalID !== 0) {
+    if (this.suppressionIntervalID !== null) {
       clearInterval(this.suppressionIntervalID);
     }
   }
@@ -294,8 +308,8 @@ export class Server extends BaseServer {
     const newServer: Server = Generic_fromJSON(Server, value.data);
 
     // Loaded servers are assumed to not be actively suppressed
-    newServer.activeSuppressionThreads = 0;
-    newServer.suppressionIntervalID = 0;
+    newServer.activeSuppressionThreads = [];
+    newServer.suppressionIntervalID = null;
     newServer.suppressionLastUpdateTime = 0;
 
     return newServer;

@@ -16,7 +16,7 @@ import {
   calculateWeakenTime,
 } from "./Hacking";
 
-import { netscriptCanGrow, netscriptCanHack, netscriptCanWeaken } from "./Hacking/netscriptCanHack";
+import { netscriptCanGrow, netscriptCanHack, netscriptCanWeaken, netscriptCanSuppress } from "./Hacking/netscriptCanHack";
 
 import { HacknetServer } from "./Hacknet/HacknetServer";
 
@@ -174,7 +174,7 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
       throw makeRuntimeRejectMsg(
         workerScript,
         `Invalid scriptArgs argument passed into getRunningScript() from ${callingFnName}(). ` +
-          `This is probably a bug. Please report to game developer`,
+        `This is probably a bug. Please report to game developer`,
       );
     }
 
@@ -692,8 +692,7 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         workerScript.log(
           "weaken",
           () =>
-            `'${server.hostname}' security level weakened to ${
-              server.hackDifficulty
+            `'${server.hostname}' security level weakened to ${server.hackDifficulty
             }. Gained ${numeralWrapper.formatExp(expGain)} hacking exp (t=${numeralWrapper.formatThreads(threads)})`,
         );
         workerScript.scriptRef.onlineExpGained += expGain;
@@ -716,7 +715,7 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
     getSharePower: function (): number {
       return CalculateShareMult();
     },
-    suppress: function (hostname: any, operatingTime?: number): any {
+    suppress: function (hostname: any, operatingTime?: number): Promise<number> {
       updateDynamicRam("suppress", getRamCost(Player, "suppress"));
       const threads = workerScript.scriptRef.threads;
       if (hostname === undefined) {
@@ -724,8 +723,7 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
       }
       const server = safeGetServer(hostname, "suppress");
       if (!(server instanceof Server)) {
-        workerScript.log("suppress", () => "Cannot be executed on this server.");
-        return false;
+        throw new Error(`suppress cannot be executed on ${hostname}`);
       }
 
       const host = GetServer(workerScript.hostname);
@@ -739,8 +737,14 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         throw makeRuntimeErrorMsg("suppress", canHack.msg || "");
       }
 
-      const suppressTime = operatingTime === undefined || operatingTime <= 0 ? Number.MAX_SAFE_INTEGER : operatingTime;
-      if (suppressTime === Number.MAX_SAFE_INTEGER) {
+      const suppressTime = operatingTime === undefined || operatingTime <= 0 ? 0x7FFFFFFF : Math.min(operatingTime, 0x7FFFFFFF);
+      if (suppressTime === 0x7FFFFFFF) {
+        workerScript.log(
+          "suppress",
+          () =>
+            `Executing on '${server.hostname}' indefinitely (t=${numeralWrapper.formatThreads(threads)}).`,
+        );
+      } else {
         workerScript.log(
           "suppress",
           () =>
@@ -749,18 +753,13 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
               true,
             )} (t=${numeralWrapper.formatThreads(threads)}).`,
         );
-      } else {
-        workerScript.log(
-          "suppress",
-          () =>
-            `Executing on '${server.hostname}' indefinitely (t=${numeralWrapper.formatThreads(threads)}).`,
-        );
       }
 
       server.addSuppressionThreads(hostname, threads);
 
       return netscriptDelay(suppressTime, workerScript).then(function () {
-        clearInterval(suppressionInterval);
+        server.removeSuppressionThreads(hostname, threads);
+
         const postSuppressServer = safeGetServer(hostname, "suppress");
         if (!(postSuppressServer instanceof Server)) {
           return Promise.reject(new Error("Could not find target server on suppress completion"));
@@ -770,16 +769,20 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         workerScript.log(
           "suppress",
           () =>
-            `Suppression on '${server.hostname}' changed from ${suppressionBefore} to ${
-              suppressionAfter
+            `Suppression on '${server.hostname}' changed from ${suppressionBefore} to ${suppressionAfter
             }. (t=${numeralWrapper.formatThreads(threads)}).`,
         );
 
-        server.removeSuppressionThreads(hostname, threads);
-        
         return Promise.resolve(suppressionAfter);
       }, function () {
         server.removeSuppressionThreads(hostname, threads);
+
+        const postSuppressServer = safeGetServer(hostname, "suppress");
+        if (!(postSuppressServer instanceof Server)) {
+          return Promise.reject(new Error("Could not find target server on suppress completion"));
+        }
+
+        return Promise.resolve(postSuppressServer.suppression);
       });
     },
     print: function (...args: any[]): void {
@@ -1630,6 +1633,33 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
       workerScript.log("getServerUsedRam", () => `returned ${numeralWrapper.formatRAM(server.ramUsed)}`);
       return server.ramUsed;
     },
+    getServerSuppression: function (hostname: any): any {
+      updateDynamicRam("getServerSuppression", getRamCost(Player, "getServerSuppression"));
+      const server = safeGetServer(hostname, "getServerSuppression");
+      if (!(server instanceof Server)) {
+        workerScript.log("getServerSuppression", () => "Cannot be executed on this server.");
+        return 1;
+      }
+      workerScript.log("getServerSuppression", () => `returned ${numeralWrapper.formatPercentage(
+        server.suppression,
+        2,
+      )}`);
+      return server.suppression;
+    },
+    suppressAnalyze(host: any, hackThreads?: any, growThreads?: any): any {
+      updateDynamicRam("suppressAnalyze", getRamCost(Player, "suppressAnalyze"));
+      const server = safeGetServer(host, "suppressAnalyze");
+      if (!(server instanceof Server)) {
+        workerScript.log("suppressAnalyze", () => "Cannot be executed on this server.");
+        return 1;
+      }
+
+      const result = server.suppressAnalyze(hackThreads, growThreads);
+      workerScript.log("suppressAnalyze", () => `returned ${numeralWrapper.format(
+        result, "0,0"
+      )}`);
+      return result;
+    },
     serverExists: function (hostname: any): any {
       updateDynamicRam("serverExists", getRamCost(Player, "serverExists"));
       return GetServer(hostname) !== null;
@@ -1715,12 +1745,12 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
 
       const cost = getPurchaseServerCost(ram);
       if (cost === Infinity) {
-        if(ram > getPurchaseServerMaxRam()){
+        if (ram > getPurchaseServerMaxRam()) {
           workerScript.log("purchaseServer", () => `Invalid argument: ram='${ram}' must not be greater than getPurchaseServerMaxRam`);
-        }else{
+        } else {
           workerScript.log("purchaseServer", () => `Invalid argument: ram='${ram}' must be a positive power of 2`);
         }
-        
+
         return "";
       }
 

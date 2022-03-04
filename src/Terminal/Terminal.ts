@@ -323,6 +323,8 @@ export class Terminal implements ITerminal {
         this.print("Required hacking skill for hack() and backdoor: " + (!isHacknet ? hackingSkill : "N/A"));
         const security = currServ.hackDifficulty;
         this.print("Server security level: " + (!isHacknet ? numeralWrapper.formatServerSecurity(security) : "N/A"));
+        const suppression = currServ.suppression;
+        this.print("Server suppression level: " + (!isHacknet ? numeralWrapper.formatPercentage(suppression, 2) : "N/A"));
         const hackingChance = calculateHackingChance(currServ, player);
         this.print("Chance to hack: " + (!isHacknet ? numeralWrapper.formatPercentage(hackingChance) : "N/A"));
         const hackingTime = calculateHackingTime(currServ, player) * 1000;

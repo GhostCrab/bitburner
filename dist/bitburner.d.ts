@@ -4449,6 +4449,58 @@ export declare interface NS extends Singularity {
      * RAM cost: 0.2 GB
      */
     getSharePower(): number;
+
+    /**
+     * Suppress security level increases on a server.
+     * @remarks
+     * RAM cost: 1.9 GB
+     *
+     * Use your hacking skills to suppress security increases on a server due to hack or grow operations.
+     * The functions effect will act continuously in the background as long as the function is running.
+     * 
+     * A server's suppression statistic grows at a constant rate regardless of how many suppression threads
+     * are targeting it. The number of suppress threads targeting a server only affects the magnitude
+     * of the suppression statistic's drop when a hack or grow operation targets the server. More suppress
+     * threads mean a smaller drop in the suppression statistic, potentially making it easier to keep the
+     * suppression statistic above 100% when a server is under constant attack.
+     *
+     * By default, this command never returns, but an optional parameter can be provided to have it return
+     * after some number of milliseconds.
+     *
+     * Like hack, grow, and weaken, `suppress` can be called on any server, regardless of
+     * where the script is running. This command requires root access to the target server, but
+     * there is no required hacking level to run the command.
+     *
+     * ```
+     * @param host - Hostname of the target server to suppress.
+     * @param operatingTime - Optional parameter to set how many milliseconds suppress should run.
+     *    If no operatingTime is provided, suppress runs indefinitely (or until the process is killed).
+     * @returns The current suppression level of the target server.
+     */
+    suppress(host: string, operatingTime?: number): Promise<number>;
+
+    /**
+     * Get the suppression percentage of a server.
+     * @remarks
+     * RAM cost: 0.05 GB
+     *
+     * @param host - Hostname of the target server.
+     * @returns used ram (GB)
+     */
+    getServerSuppression(host: string): number;
+
+    /**
+     * Get the effect of a number of hack and grow threads on a server's suppression statistic based
+     * on the suppression currently acting on the server.
+     * @remarks
+     * RAM cost: 1.0 GB
+     * 
+     * @param host - Hostname of the target server.
+     * @param hackThreads - Number of hack threads that would be acting on the server. Optional. Defaults to 0.
+     * @param growThreads - Number of grow threads that would be acting on the server. Optional. Defaults to 0.
+     * @returns amount suppression would be reduced
+     */
+    suppressAnalyze(host: string, hackThreads?: number, growThreads?: number): number;
 }
 
 /**
@@ -6607,12 +6659,12 @@ export declare interface WarehouseAPI {
      * @param all - Sell in all city
      */
     sellProduct(
-    divisionName: string,
-    cityName: string,
-    productName: string,
-    amt: string,
-    price: string,
-    all: boolean,
+        divisionName: string,
+        cityName: string,
+        productName: string,
+        amt: string,
+        price: string,
+        all: boolean,
     ): void;
     /**
      * Discontinue a product.
@@ -6696,12 +6748,12 @@ export declare interface WarehouseAPI {
      * @param amt - Amount of material to export.
      */
     exportMaterial(
-    sourceDivision: string,
-    sourceCity: string,
-    targetDivision: string,
-    targetCity: string,
-    materialName: string,
-    amt: number,
+        sourceDivision: string,
+        sourceCity: string,
+        targetDivision: string,
+        targetCity: string,
+        materialName: string,
+        amt: number,
     ): void;
     /**
      * Cancel material export
@@ -6713,12 +6765,12 @@ export declare interface WarehouseAPI {
      * @param amt - Amount of material to export.
      */
     cancelExportMaterial(
-    sourceDivision: string,
-    sourceCity: string,
-    targetDivision: string,
-    targetCity: string,
-    materialName: string,
-    amt: number,
+        sourceDivision: string,
+        sourceCity: string,
+        targetDivision: string,
+        targetCity: string,
+        materialName: string,
+        amt: number,
     ): void;
     /**
      * Purchase warehouse for a new city
@@ -6741,11 +6793,11 @@ export declare interface WarehouseAPI {
      * @param marketingInvest - Amount to invest for the marketing of the product.
      */
     makeProduct(
-    divisionName: string,
-    cityName: string,
-    productName: string,
-    designInvest: number,
-    marketingInvest: number,
+        divisionName: string,
+        cityName: string,
+        productName: string,
+        designInvest: number,
+        marketingInvest: number,
     ): void;
     /**
      * Gets the cost to purchase a warehouse
