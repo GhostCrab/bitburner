@@ -53,3 +53,7 @@ export function netscriptCanGrow(server: Server): IReturnStatus {
 export function netscriptCanWeaken(server: Server): IReturnStatus {
   return baseCheck(server, "weaken");
 }
+
+export function netscriptCanSuppress(server: Server): IReturnStatus {
+  return baseCheck(server, "suppress");
+}

@@ -6,6 +6,9 @@ import { BitNodeMultipliers } from "../BitNode/BitNodeMultipliers";
 import { createRandomString } from "../utils/helpers/createRandomString";
 import { createRandomIp } from "../utils/IPAddress";
 import { Generic_fromJSON, Generic_toJSON, Reviver } from "../utils/JSONReviver";
+import { Player } from "./Player";
+import { calculateWeakenTime } from "./Hacking";
+import { GetServer } from "./AllServers";
 
 export interface IConstructorParams {
   adminRights?: boolean;
@@ -20,6 +23,7 @@ export interface IConstructorParams {
   purchasedByPlayer?: boolean;
   requiredHackingSkill?: number;
   serverGrowth?: number;
+  suppression?: number;
 }
 
 export class Server extends BaseServer {
@@ -54,6 +58,18 @@ export class Server extends BaseServer {
   // Parameter that affects how effectively this server's money can
   // be increased using the grow() Netscript function
   serverGrowth = 1;
+
+  // Parameter that mitigates security increases from hack and grow operations
+  suppression = 0;
+
+  // Tracks the number of active suppression threads acting on this server
+  activeSuppressionThreads: {hostname: string, threads: number}[] = [];
+
+  // Suppression function interval ID
+  suppressionIntervalID = 0;
+
+  // Last time suppression was calculated
+  suppressionLastUpdateTime = 0;
 
   constructor(params: IConstructorParams = { hostname: "", ip: createRandomIp() }) {
     super(params);
@@ -134,19 +150,135 @@ export class Server extends BaseServer {
   }
 
   /**
-   * Strengthens a server's security level (difficulty) by the specified amount
+   * Strengthens a server's security level (difficulty) by the specified amount,
+   * mitigated by the server's suppression statistic if it is > 0 and reduces
+   * suppression.
    */
   fortify(amt: number): void {
-    this.hackDifficulty += amt;
+    this.hackDifficulty += amt * (1 - Math.min(this.suppression, 1));
     this.capDifficulty();
+
+    // reduce suppression
+    if (this.suppression > 0) {
+      const suppressionFactor = this.getSuppressionFactor();
+      if (suppressionFactor <= 0) {
+        this.suppression = 0;
+      } else {
+        this.suppression -= (amt / suppressionFactor) / 2;
+        this.suppression = Math.max(this.suppression, 0);
+      }
+    }
   }
 
   /**
-   * Lowers the server's security level (difficulty) by the specified amount)
+   * Lowers the server's security level (difficulty) by the specified amount
    */
   weaken(amt: number): void {
     this.hackDifficulty -= amt * BitNodeMultipliers.ServerWeakenRate;
     this.capDifficulty();
+  }
+
+  /**
+   * Increases the server's suppression level by the specified amount, limited
+   * at 1.5
+   */
+  suppress(amt: number): void {
+    this.suppress += amt;
+    this.suppress = Math.min(this.suppress, 1.5);
+  }
+
+  /**
+   * Add to this server's active suppression and kick of suppression updates if this is the
+   * initial suppression attack
+   */
+  addSuppressionThreads(hostname: string, threads: number) {
+    // Detect if we're starting to suppress this server and kick off suppression update
+    if (this.activeSuppressionThreads.length === 0) {
+      if (this.suppressionIntervalID !== 0) {
+        console.error(`New suppression detected on ${this.hostname} but suppressionIntervalID is not 0`);
+        clearInterval(this.suppressionIntervalID);
+      } 
+      this.suppressionLastUpdateTime = new Date().getTime();
+      this.suppressionIntervalID = setInterval(this.doSuppressionUpdate, 200)
+    }
+
+    this.activeSuppressionThreads.push({hostname: hostname, threads: threads});
+  }
+
+  /**
+   * Remove from this server's active supression thread collection and kill suppression updates if
+   * there are no more active suppressions.
+   */
+  removeSuppressionThreads(hostname: string, threads: number) {
+    if (this.activeSuppressionThreads.length === 0) {
+      console.error(`Attepting to remove suppresion threads from ${this.hostname} where server hostname is ${
+        hostname
+      } and threads is ${threads}, but there are no active suppresion threads`);
+      return;
+    }
+
+    const itemIndex = this.activeSuppressionThreads.findIndex(a => a.hostname === hostname && a.threads = threads);
+
+    if (itemIndex === -1) {
+      console.error(`Unable to find suppression item for ${this.hostname} where server hostname is ${hostname} and threads is ${threads}`);
+      return;
+    }
+
+    this.activeSuppressionThreads.splice(itemIndex, 1);
+
+    if (this.activeSuppressionThreads.length === 0) {
+      if (this.suppressionIntervalID === 0) {
+        console.error(`Suppression threads on ${this.hostname} have been reduced to 0 but suppressionIntervalID is 0`);
+      }
+
+      clearInterval(this.suppressionIntervalID);
+      this.suppressionIntervalID = 0;
+      this.suppressionLastUpdateTime = 0;
+    }
+  }
+
+  /**
+   * Update this server's suppression -- intended to be called by setInterval at a constant
+   * rate as long as this server is being actively suppressed
+   */
+  doSuppressionUpdate(): void {
+    const currentTime = new Date().getTime();
+    const weakenTime = calculateWeakenTime(server, Player);
+    const dT = currentTime - this.suppressionLastUpdateTime;
+    this.suppress((dT / weakenTime) / 2);
+    this.suppressionLastUpdateTime = currentTime;
+  }
+
+  /**
+   * Returns a factor describing how much a server's suppression value will be reduced for a
+   * given security increase where:
+   *   suppression reduction = (security increase / suppression factor) / 2
+   */
+  getSuppressionFactor(): number {
+    // collect number of active suppress threads, suppress threads from servers with 
+    // cores > 1 are more effective, so they will count as more than 1
+    let effectiveThreads = 0;
+    for (const data of this.activeSuppressionThreads) {
+      const server = GetServer(data.hostname);
+      if (server === null) {
+        console.error(`Unable to resolve server for suppression item ${data.hostname}:${data.threads}`);
+        continue;
+      }
+
+      const coreBonus = 1 + (server.cpuCores - 1) / 16;
+      effectiveThreads += coreBonus * data.threads;
+    }
+
+    return CONSTANTS.ServerWeakenAmount * effectiveThreads * BitNodeMultipliers.ServerWeakenRate;
+  }
+
+  /**
+   * Clean up active suppression intervals if the server is sold or destroyed
+   */
+  destroy(): void {
+    if (this.suppressionIntervalID !== 0) {
+      clearInterval(this.suppressionIntervalID);
+    }
   }
 
   /**
@@ -159,7 +291,14 @@ export class Server extends BaseServer {
   // Initializes a Server Object from a JSON save state
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
   static fromJSON(value: any): Server {
-    return Generic_fromJSON(Server, value.data);
+    const newServer: Server = Generic_fromJSON(Server, value.data);
+
+    // Loaded servers are assumed to not be actively suppressed
+    newServer.activeSuppressionThreads = 0;
+    newServer.suppressionIntervalID = 0;
+    newServer.suppressionLastUpdateTime = 0;
+
+    return newServer;
   }
 }
 

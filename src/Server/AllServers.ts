@@ -68,6 +68,7 @@ export function DeleteServer(serverkey: string): void {
   for (const key of Object.keys(AllServers)) {
     const server = AllServers[key];
     if (server.ip !== serverkey && server.hostname !== serverkey) continue;
+    AllServers[key].destroy();
     delete AllServers[key];
     break;
   }

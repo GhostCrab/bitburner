@@ -716,6 +716,72 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
     getSharePower: function (): number {
       return CalculateShareMult();
     },
+    suppress: function (hostname: any, operatingTime?: number): any {
+      updateDynamicRam("suppress", getRamCost(Player, "suppress"));
+      const threads = workerScript.scriptRef.threads;
+      if (hostname === undefined) {
+        throw makeRuntimeErrorMsg("suppress", "Takes 1 argument.");
+      }
+      const server = safeGetServer(hostname, "suppress");
+      if (!(server instanceof Server)) {
+        workerScript.log("suppress", () => "Cannot be executed on this server.");
+        return false;
+      }
+
+      const host = GetServer(workerScript.hostname);
+      if (host === null) {
+        throw new Error("Workerscript host is null");
+      }
+
+      // No root access or skill level too low
+      const canHack = netscriptCanSuppress(server);
+      if (!canHack.res) {
+        throw makeRuntimeErrorMsg("suppress", canHack.msg || "");
+      }
+
+      const suppressTime = operatingTime === undefined || operatingTime <= 0 ? Number.MAX_SAFE_INTEGER : operatingTime;
+      if (suppressTime === Number.MAX_SAFE_INTEGER) {
+        workerScript.log(
+          "suppress",
+          () =>
+            `Executing on '${server.hostname}' in ${convertTimeMsToTimeElapsedString(
+              suppressTime * 1000,
+              true,
+            )} (t=${numeralWrapper.formatThreads(threads)}).`,
+        );
+      } else {
+        workerScript.log(
+          "suppress",
+          () =>
+            `Executing on '${server.hostname}' indefinitely (t=${numeralWrapper.formatThreads(threads)}).`,
+        );
+      }
+
+      server.addSuppressionThreads(hostname, threads);
+
+      return netscriptDelay(suppressTime, workerScript).then(function () {
+        clearInterval(suppressionInterval);
+        const postSuppressServer = safeGetServer(hostname, "suppress");
+        if (!(postSuppressServer instanceof Server)) {
+          return Promise.reject(new Error("Could not find target server on suppress completion"));
+        }
+        const suppressionBefore = server.suppression;
+        const suppressionAfter = postSuppressServer.suppression;
+        workerScript.log(
+          "suppress",
+          () =>
+            `Suppression on '${server.hostname}' changed from ${suppressionBefore} to ${
+              suppressionAfter
+            }. (t=${numeralWrapper.formatThreads(threads)}).`,
+        );
+
+        server.removeSuppressionThreads(hostname, threads);
+        
+        return Promise.resolve(suppressionAfter);
+      }, function () {
+        server.removeSuppressionThreads(hostname, threads);
+      });
+    },
     print: function (...args: any[]): void {
       if (args.length === 0) {
         throw makeRuntimeErrorMsg("print", "Takes at least 1 argument.");

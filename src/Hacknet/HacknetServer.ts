@@ -144,6 +144,10 @@ export class HacknetServer extends BaseServer implements IHacknetNode {
     }
   }
 
+  destroy(): void {
+    // Do Nothing
+  }
+
   // Serialize the current object to a JSON save state
   toJSON(): any {
     return Generic_toJSON("HacknetServer", this);
