@@ -16,7 +16,12 @@ import {
   calculateWeakenTime,
 } from "./Hacking";
 
-import { netscriptCanGrow, netscriptCanHack, netscriptCanWeaken, netscriptCanSuppress } from "./Hacking/netscriptCanHack";
+import {
+  netscriptCanGrow,
+  netscriptCanHack,
+  netscriptCanWeaken,
+  netscriptCanSuppress,
+} from "./Hacking/netscriptCanHack";
 
 import { HacknetServer } from "./Hacknet/HacknetServer";
 
@@ -737,12 +742,14 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         throw makeRuntimeErrorMsg("suppress", canHack.msg || "");
       }
 
-      const suppressTime = operatingTime === undefined || operatingTime <= 0 ? 0x7FFFFFFF : Math.min(operatingTime, 0x7FFFFFFF);
-      if (suppressTime === 0x7FFFFFFF) {
+      const suppressTime =
+        operatingTime === undefined || isNaN(operatingTime) || operatingTime <= 0
+          ? 0x7fffffff
+          : Math.min(operatingTime, 0x7fffffff);
+      if (suppressTime === 0x7fffffff) {
         workerScript.log(
           "suppress",
-          () =>
-            `Executing on '${server.hostname}' indefinitely (t=${numeralWrapper.formatThreads(threads)}).`,
+          () => `Executing on '${server.hostname}' indefinitely (t=${numeralWrapper.formatThreads(threads)}).`,
         );
       } else {
         workerScript.log(
@@ -757,7 +764,8 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
 
       server.addSuppressionThreads(hostname, threads);
 
-      return netscriptDelay(suppressTime, workerScript).then(function () {
+      return netscriptDelay(suppressTime, workerScript).then(
+        function () {
         server.removeSuppressionThreads(hostname, threads);
 
         const postSuppressServer = safeGetServer(hostname, "suppress");
@@ -769,12 +777,16 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         workerScript.log(
           "suppress",
           () =>
-            `Suppression on '${server.hostname}' changed from ${suppressionBefore} to ${suppressionAfter
-            }. (t=${numeralWrapper.formatThreads(threads)}).`,
+              `Suppression on '${
+                server.hostname
+              }' changed from ${suppressionBefore} to ${suppressionAfter}. (t=${numeralWrapper.formatThreads(
+                threads,
+              )}).`,
         );
 
         return Promise.resolve(suppressionAfter);
-      }, function () {
+        },
+        function () {
         server.removeSuppressionThreads(hostname, threads);
 
         const postSuppressServer = safeGetServer(hostname, "suppress");
@@ -783,7 +795,8 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         }
 
         return Promise.resolve(postSuppressServer.suppression);
-      });
+        },
+      );
     },
     print: function (...args: any[]): void {
       if (args.length === 0) {
@@ -1640,10 +1653,10 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
         workerScript.log("getServerSuppression", () => "Cannot be executed on this server.");
         return 1;
       }
-      workerScript.log("getServerSuppression", () => `returned ${numeralWrapper.formatPercentage(
-        server.suppression,
-        2,
-      )}`);
+      workerScript.log(
+        "getServerSuppression",
+        () => `returned ${numeralWrapper.formatPercentage(server.suppression, 2)}`,
+      );
       return server.suppression;
     },
     suppressAnalyze(host: any, hackThreads?: any, growThreads?: any): any {
@@ -1655,9 +1668,7 @@ export function NetscriptFunctions(workerScript: WorkerScript): NS {
       }
 
       const result = server.suppressAnalyze(hackThreads, growThreads);
-      workerScript.log("suppressAnalyze", () => `returned ${numeralWrapper.format(
-        result, "0,0"
-      )}`);
+      workerScript.log("suppressAnalyze", () => `returned ${numeralWrapper.format(result, "0,0")}`);
       return result;
     },
     serverExists: function (hostname: any): any {
